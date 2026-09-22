@@ -1,0 +1,231 @@
+{
+  "component": "discovery-info",
+  "source": "Fixture runs/office-info.bin (unauthenticated GET /info binary-plist from the Demo TV Samsung Frame). Decoded with probe.decode_plist -> plistlib.loads (probe.py lines 279-285). mDNS fields parsed by probe.discover (probe.py lines 1125-1140): name=avahi field[3] with \\DDD unescaped, host=field[7], port=field[8], txt=field[9]. features/displays/statusFlags/volumeControlType/sourceVersion consumed by probe.run (probe.py lines 1222, 1388-1396). AIRPLAY_PORT=7000 (probe.py line 65).",
+  "note": "Frame advertises hostname localhost.local in mDNS SRV; connect by the resolved A-record IP, never the hostname. mDNS can lag across subnets, so a remembered IP must be probed directly (GET /info to host:7000) rather than waiting for a browse hit. This /info is UNAUTHENTICATED (no HAP pairing needed); the probe also fetches an identical-shaped ENCRYPTED /info at step [2] (probe.py line 1221). features is a 64-bit little-endian bitfield; featuresEx is base64url(no-pad) of the 8 little-endian feature bytes followed by a 2-byte extended-feature word.",
+  "fixture": {
+    "file": "office-info.bin",
+    "bytes": 1870,
+    "sha256": "27bc8bdc63ef2ade7f4f33427d740f743b1f636e470b4791e26757713e55900a",
+    "format": "Apple binary plist (bplist00)",
+    "decode": "plistlib.loads(bytes) == serde equivalent of a binary plist dict"
+  },
+  "info_fields": {
+    "sdk": "AirPlay;3.6.0.72",
+    "pi": "02:1A:2B:3C:4D:5F",
+    "firmwareRevision": "T-RSMFAKUC-0090-1301.0",
+    "integrator": "Samsung",
+    "manufacturer": "Samsung",
+    "audioLatencies": [
+      {
+        "inputLatencyMicros": 0,
+        "type": 100,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "default",
+        "type": 100,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "media",
+        "type": 100,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "telephony",
+        "type": 100,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "speechRecognition",
+        "type": 100,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "alert",
+        "type": 100,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "type": 101,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "default",
+        "type": 101,
+        "outputLatencyMicros": 0
+      },
+      {
+        "inputLatencyMicros": 0,
+        "audioType": "media",
+        "type": 102,
+        "outputLatencyMicros": 0
+      }
+    ],
+    "keepAliveLowPower": true,
+    "firmwareBuildDate": "Jan 16 2025",
+    "operatingSystem": "Tizen",
+    "model": "LS03F",
+    "playbackCapabilities": {
+      "supportsUIForAudioOnlyContent": false,
+      "fairPlayCDMPluginVersion": "0.2.5",
+      "supportsFPSSecureStop": false,
+      "webAppVersion": "75.112.0",
+      "fairPlayLibVersion": "1.9.28",
+      "webEngineVersion": "14.3.1 (samsung2024-7972e191)",
+      "supportsOfflineHLS": false,
+      "hlsJSVersion": "3.4.21",
+      "webEngineName": "Apple App Engine",
+      "supportsIntegratedTimeline": false,
+      "supportsInterstitials": true,
+      "supportsAirPlayVideoWithSharePlay": true
+    },
+    "serialNumber": "0XX00XXX000000X",
+    "nameIsFactoryDefault": false,
+    "hardwareRevision": "HardwareRevision-0.0",
+    "keepAliveSendStatsAsBody": true,
+    "featuresEx": "0Ip/AEbPiwNACA",
+    "statusFlags": 580,
+    "deviceID": "02:1A:2B:3C:4D:5E",
+    "displays": [
+      {
+        "widthPixelsMax": 3840,
+        "HDRInfo": {
+          "codecStrings": [
+            "hvc1.2.4.L153.B0"
+          ],
+          "type": 2,
+          "HDRMode": "HDR10",
+          "receiverHDRCapability": "4k60"
+        },
+        "widthPixels": 1920,
+        "HDRSupportedModes": [
+          {
+            "codecStrings": [
+              "avc1.64002a",
+              "hvc1.2.4.L153.B0"
+            ],
+            "type": 0,
+            "HDRMode": "SDR",
+            "receiverHDRCapability": "4k60"
+          },
+          {
+            "codecStrings": [
+              "hvc1.2.4.L153.B0"
+            ],
+            "type": 1,
+            "HDRMode": "HDR",
+            "receiverHDRCapability": "4k60"
+          },
+          {
+            "codecStrings": [
+              "hvc1.2.4.L153.B0"
+            ],
+            "type": 2,
+            "HDRMode": "HDR10",
+            "receiverHDRCapability": "4k60"
+          },
+          {
+            "codecStrings": [
+              "hvc1.2.4.L153.B0"
+            ],
+            "type": 4,
+            "HDRMode": "HLG",
+            "receiverHDRCapability": "4k60"
+          }
+        ],
+        "heightPixels": 1080,
+        "heightPixelsMax": 2160,
+        "uuid": "A1B2C3D4-0000-4000-8000-00000000FEED",
+        "maxFPS": 60
+      }
+    ],
+    "build": "40.00",
+    "PTPInfo": "AirPlay;3.6.0.72",
+    "protocolVersion": "1.1",
+    "sourceVersion": "377.40.00",
+    "features": 255525703439583952,
+    "activeInterfaceType": 0,
+    "volumeControlType": 3,
+    "name": "Demo TV"
+  },
+  "feature_bits": {
+    "features_uint64": 255525703439583952,
+    "features_hex_be": "0x038BCF46007F8AD0",
+    "features_le_bytes_hex": "d08a7f0046cf8b03",
+    "lo32_hex": "0x007F8AD0",
+    "hi32_hex": "0x038BCF46",
+    "set_bit_indices": [
+      4,
+      6,
+      7,
+      9,
+      11,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      33,
+      34,
+      38,
+      40,
+      41,
+      42,
+      43,
+      46,
+      47,
+      48,
+      49,
+      51,
+      55,
+      56,
+      57
+    ],
+    "set_bit_count": 28
+  },
+  "features_ex": {
+    "featuresEx_str": "0Ip/AEbPiwNACA",
+    "decoded_hex": "d08a7f0046cf8b034008",
+    "decoded_len": 10,
+    "matches_features_le8": true,
+    "extended_word_hex": "0x0840",
+    "extended_set_bit_indices": [
+      70,
+      75
+    ]
+  },
+  "scalars": {
+    "name": "Demo TV",
+    "sourceVersion": "377.40.00",
+    "protocolVersion": "1.1",
+    "statusFlags": 580,
+    "volumeControlType": 3,
+    "activeInterfaceType": 0,
+    "deviceID": "02:1A:2B:3C:4D:5E",
+    "pi": "02:1A:2B:3C:4D:5F",
+    "model": "LS03F",
+    "manufacturer": "Samsung",
+    "num_displays": 1,
+    "num_audioLatencies": 9
+  },
+  "display0": {
+    "widthPixels": 1920,
+    "heightPixels": 1080,
+    "widthPixelsMax": 3840,
+    "heightPixelsMax": 2160,
+    "maxFPS": 60,
+    "uuid": "A1B2C3D4-0000-4000-8000-00000000FEED",
+    "num_HDRSupportedModes": 4
+  }
+}

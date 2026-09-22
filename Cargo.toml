@@ -1,0 +1,56 @@
+[package]
+name = "airplay-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust AirPlay session-core library + CLI, ported from the reference probe"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "airplay_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "airplay"
+path = "src/bin/airplay.rs"
+
+[dependencies]
+# async runtime (requested; used by the transport/session bring-up)
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+# crypto
+srp = "0.6.0"
+ed25519-dalek = { version = "2.2", features = ["rand_core"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+chacha20poly1305 = "0.10.1"
+hkdf = "0.12.4"
+sha2 = "0.10.9"
+aes = "0.8.4"
+ctr = "0.9.2"
+num-bigint-dig = "0.8.6"
+# discovery + plist
+mdns-sd = "0.11.5"
+plist = "1.10"
+base64 = "0.22.1"
+# misc
+indexmap = "2.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1.0"
+anyhow = "1.0"
+uuid = { version = "1.26", features = ["v4"] }
+rand = "0.8.5"
+rand_core = "0.6.4"
+libc = "0.2.189"
+hex = "0.4.3"
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", default-features = false, features = ["client", "staging"] }
+# hardware video encode: libavcodec/libavfilter/libswscale bindings (system ffmpeg 9)
+ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "filter", "software-scaling"] }
+# system-audio capture (audiocapture.rs): native PipeWire stream + lock-free RT ring
+pipewire = "0.10"
+libspa-sys = "0.10"
+rtrb = "0.3"
+
+[dev-dependencies]
+hex = "0.4.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -1,0 +1,75 @@
+{
+  "component": "timing-ntp",
+  "source": "probe.py TimingResponder + boot_ntp_timestamp()",
+  "constants": {
+    "NTP_EPOCH_OFFSET": 2208988800
+  },
+  "note": "Bytes are authoritative: request/reply built by copying TimingResponder.probe_receiver and TimingResponder.run byte-slicing; ntp64 built by copying boot_ntp_timestamp() fixed-point math. boot_ntp_timestamp() itself reads CLOCK_BOOTTIME so server_now/client_tx are injected as fixed values to make packets deterministic.",
+  "packet_vectors": [
+    {
+      "name": "seq1_boot123456.5",
+      "client_boottime_seconds": 123456.5,
+      "client_transmit_ntp": 9488064894860263424,
+      "seq": 1,
+      "request_hex": "80d20001000000000000000000000000000000000000000083ac60c080000000",
+      "server_now_boottime_seconds": 200000.25,
+      "server_now_ntp": 9488393647763226624,
+      "reply_hex": "80d300010000000083ac60c08000000083ad8bc04000000083ad8bc040000000"
+    },
+    {
+      "name": "seq2_intsecs",
+      "client_boottime_seconds": 1000.0,
+      "client_transmit_ntp": 9487538948197580800,
+      "seq": 2,
+      "request_hex": "80d20002000000000000000000000000000000000000000083aa826800000000",
+      "server_now_boottime_seconds": 1000.5,
+      "server_now_ntp": 9487538950345064448,
+      "reply_hex": "80d300020000000083aa82680000000083aa82688000000083aa826880000000"
+    },
+    {
+      "name": "seq3_arbitrary_bytes",
+      "client_transmit_ntp": 81985529216486895,
+      "seq": 3,
+      "request_hex": "80d2000300000000000000000000000000000000000000000123456789abcdef",
+      "server_now_ntp": 16361324744257920623,
+      "reply_hex": "80d30003000000000123456789abcdefe30f1a2b3c4d5e6fe30f1a2b3c4d5e6f"
+    }
+  ],
+  "timestamp_conversion_vectors": [
+    {
+      "boottime_seconds": 0.0,
+      "ntp64": 9487534653230284800,
+      "ntp64_hex": "83aa7e8000000000"
+    },
+    {
+      "boottime_seconds": 1.0,
+      "ntp64": 9487534657525252096,
+      "ntp64_hex": "83aa7e8100000000"
+    },
+    {
+      "boottime_seconds": 0.5,
+      "ntp64": 9487534655377768448,
+      "ntp64_hex": "83aa7e8080000000"
+    },
+    {
+      "boottime_seconds": 123456.5,
+      "ntp64": 9488064894860263424,
+      "ntp64_hex": "83ac60c080000000"
+    },
+    {
+      "boottime_seconds": 200000.25,
+      "ntp64": 9488393647763226624,
+      "ntp64_hex": "83ad8bc040000000"
+    },
+    {
+      "boottime_seconds": 1000.0,
+      "ntp64": 9487538948197580800,
+      "ntp64_hex": "83aa826800000000"
+    },
+    {
+      "boottime_seconds": 3.141592653589793,
+      "ntp64": 9487534666723322504,
+      "ntp64_hex": "83aa7e83243f6a88"
+    }
+  ]
+}
