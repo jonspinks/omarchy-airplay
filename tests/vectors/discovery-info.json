@@ -1,9 +1,9 @@
 {
   "component": "discovery-info",
-  "source": "Fixture runs/office-info.bin (unauthenticated GET /info binary-plist from the Demo TV Samsung Frame). Decoded with probe.decode_plist -> plistlib.loads (probe.py lines 279-285). mDNS fields parsed by probe.discover (probe.py lines 1125-1140): name=avahi field[3] with \\DDD unescaped, host=field[7], port=field[8], txt=field[9]. features/displays/statusFlags/volumeControlType/sourceVersion consumed by probe.run (probe.py lines 1222, 1388-1396). AIRPLAY_PORT=7000 (probe.py line 65).",
+  "source": "Fixture runs/demo-info.bin (unauthenticated GET /info binary-plist from the Demo TV Samsung Frame). Decoded with probe.decode_plist -> plistlib.loads (probe.py lines 279-285). mDNS fields parsed by probe.discover (probe.py lines 1125-1140): name=avahi field[3] with \\DDD unescaped, host=field[7], port=field[8], txt=field[9]. features/displays/statusFlags/volumeControlType/sourceVersion consumed by probe.run (probe.py lines 1222, 1388-1396). AIRPLAY_PORT=7000 (probe.py line 65).",
   "note": "Frame advertises hostname localhost.local in mDNS SRV; connect by the resolved A-record IP, never the hostname. mDNS can lag across subnets, so a remembered IP must be probed directly (GET /info to host:7000) rather than waiting for a browse hit. This /info is UNAUTHENTICATED (no HAP pairing needed); the probe also fetches an identical-shaped ENCRYPTED /info at step [2] (probe.py line 1221). features is a 64-bit little-endian bitfield; featuresEx is base64url(no-pad) of the 8 little-endian feature bytes followed by a 2-byte extended-feature word.",
   "fixture": {
-    "file": "office-info.bin",
+    "file": "demo-info.bin",
     "bytes": 1870,
     "sha256": "27bc8bdc63ef2ade7f4f33427d740f743b1f636e470b4791e26757713e55900a",
     "format": "Apple binary plist (bplist00)",

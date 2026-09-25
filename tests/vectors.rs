@@ -459,7 +459,7 @@ fn discovery_info_vectors() {
     assert_eq!(decoded.len(), fx["decoded_len"].as_u64().unwrap() as usize);
 
     // --- parse the real /info fixture ---
-    let body = std::fs::read(vectors_dir().join("office-info.bin")).unwrap();
+    let body = std::fs::read(vectors_dir().join("demo-info.bin")).unwrap();
     let info = parse_info(&body).unwrap();
     let sc = &doc["scalars"];
     assert_eq!(info.name, sc["name"].as_str().unwrap());

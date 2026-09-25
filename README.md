@@ -119,6 +119,20 @@ administered, and the serial number and display UUID are placeholders.
 `tests/vectors/gen_audio_vectors.py` regenerates the audio vectors by running
 the original probe code; point `AIRPLAY_PROBE` at a checkout of the probe repo.
 
+## Security
+
+- **Pairing keys are long-term credentials** for each receiver. They are kept in
+  `~/.config/airplay-rs/credentials` (`$XDG_CONFIG_HOME` if set; directory
+  0700, files 0600) and never logged. `airplay pair <ip> --forget` deletes a
+  receiver's key; unpair on the TV as well to revoke it there.
+- **What is captured:** the chosen output, window or virtual display, and with
+  `--audio system` the laptop's system sound. It goes only to the receiver you
+  named.
+- Discovery trusts mDNS on the local network, like every AirPlay sender.
+
+Please report a security problem privately, from the repository's
+**Security** tab, rather than in a public issue.
+
 ## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at

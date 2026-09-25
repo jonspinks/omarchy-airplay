@@ -1,1 +1,9 @@
 /target
+
+# Pairing keys are long-term receiver credentials and live outside the
+# checkout, under ~/.config/airplay-rs/credentials. These are belt and braces
+# in case one is ever copied here.
+credentials.json
+.env
+*.pem
+*.key
