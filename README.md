@@ -9,6 +9,21 @@ against a real receiver ([omarchy-airplay-probe](https://github.com/jonspinks/om
 It is the engine behind [omarchy-cast](https://github.com/jonspinks/omarchy-cast),
 the Omarchy bar widget — but it is a normal CLI and works on its own.
 
+## On Omarchy: the full set
+
+On Omarchy this sender is the first of three pieces, and the full experience
+needs all three:
+
+| Piece | What it does |
+|---|---|
+| **omarchy-airplay** (this repo) | Finds receivers, pairs, captures and streams |
+| [omarchy-cast](https://github.com/jonspinks/omarchy-cast) (`blacksheep.airplay`) | The bar menu: pick a TV, pick a mode, pair, stop |
+| [omarchy-workspaces](https://github.com/jonspinks/omarchy-workspaces) (`blacksheep.workspaces`, listed as Cast Workspaces) | Marks the workspace that `--extend` puts on the TV, so you can see which one it is |
+
+Omarchy plugins can't declare dependencies, so each piece is installed on its
+own. [omarchy-cast's README](https://github.com/jonspinks/omarchy-cast#the-full-set)
+has the steps in order, and explains why Extend needs Cast Workspaces.
+
 ## Status
 
 Reverse-engineered from observed behaviour, not from any Apple specification.
