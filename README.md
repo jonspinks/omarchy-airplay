@@ -4,25 +4,55 @@ A native AirPlay 2 **sender** for Linux: mirror a Wayland desktop, a single
 window, or an extra virtual display to an AirPlay receiver, with optional system
 audio and volume sync.
 
-Written in Rust, ported from a Python probe that reverse-engineered the protocol
-against a real receiver ([omarchy-airplay-probe](https://github.com/jonspinks/omarchy-airplay-probe)).
-It is the engine behind [omarchy-cast](https://github.com/jonspinks/omarchy-cast),
-the Omarchy bar widget — but it is a normal CLI and works on its own.
+## AirPlay for Omarchy
 
-## On Omarchy: the full set
+On a Mac, AirPlay is a menu in the menu bar: pick a TV, then pick how to use
+it. You can mirror the screen, send one window, or use the TV as a separate
+display. AirPlay for Omarchy brings that experience to Omarchy, natively. It
+isn't a wrapper around someone else's tool. The sender was written and tested
+from the ground up in Rust for Wayland and Hyprland, and performance and
+security were the design constraints from the start.
 
-On Omarchy this sender is the first of three pieces, and the full experience
-needs all three:
+![AirPlay for Omarchy: the TV's workspace in the bar, and the AirPlay menu streaming a second desktop](docs/preview.png)
 
-| Piece | What it does |
-|---|---|
-| **omarchy-airplay** (this repo) | Finds receivers, pairs, captures and streams |
-| [omarchy-cast](https://github.com/jonspinks/omarchy-cast) (`blacksheep.airplay`) | The bar menu: pick a TV, pick a mode, pair, stop |
-| [omarchy-workspaces](https://github.com/jonspinks/omarchy-workspaces) (`blacksheep.workspaces`, listed as Cast Workspaces) | Marks the workspace that `--extend` puts on the TV, so you can see which one it is |
+- **Three ways to use a TV, as on a Mac:** this screen, one window, or a second
+  desktop.
+- **Video, or video with sound.** With **Send audio** on, the laptop's sound
+  moves to the TV through its own *AirPlay: <TV>* output, the way a Mac hands
+  over its sound. The TV's volume follows the laptop's, and your speakers come
+  back when the session ends.
+- **The second desktop is one click away.** The TV gets its own workspace, and
+  the workspace bar shows it as a TV icon at the end of the row: click it to
+  switch there, and drag a window onto it to put that window on the TV.
+- **Fast.** Screen capture stays on the GPU and goes straight into the
+  hardware H.264 encoder (zero-copy). It takes about 5 ms from a frame being
+  drawn to being encoded, using about 7 % of one CPU core. See
+  [Performance](#performance).
+- **Careful.** Pairing keys stay private to your account. Every build is pinned
+  to a tested commit. The bar menu only ever stops, cleans up or signals
+  something it started and recorded.
+
+It is three pieces, and the full experience needs all three:
+
+| Piece | Its part in the set |
+|-------|---------------------|
+| [omarchy-airplay](https://github.com/jonspinks/omarchy-airplay) | **The sender.** Finds receivers, pairs, captures the screen, a window or a virtual display, encodes on the GPU and streams video and sound. |
+| [omarchy-cast](https://github.com/jonspinks/omarchy-cast) (`blacksheep.airplay`) | **The AirPlay menu.** The bar icon and panel: receivers, the three modes, pairing, Send audio and Stop. |
+| [omarchy-workspaces](https://github.com/jonspinks/omarchy-workspaces) (`blacksheep.workspaces`, listed as *Cast Workspaces*) | **The TV in your workspace bar.** Marks the second desktop's workspace with a TV icon at the end of the row, so it is one click to reach. |
 
 Omarchy plugins can't declare dependencies, so each piece is installed on its
-own. [omarchy-cast's README](https://github.com/jonspinks/omarchy-cast#the-full-set)
-has the steps in order, and explains why Extend needs Cast Workspaces.
+own. [omarchy-cast's README](https://github.com/jonspinks/omarchy-cast#install)
+has the steps in order.
+
+### This repo: the sender
+
+The engine behind the set, and a normal CLI that works on its own (`airplay
+discover`, `airplay pair`, `airplay mirror`). Written in Rust, and ported from a
+Python probe that reverse-engineered the protocol against a real receiver
+([omarchy-airplay-probe](https://github.com/jonspinks/omarchy-airplay-probe)).
+It talks to Hyprland for window and virtual-display capture, to VA-API for
+H.264, and to PipeWire for sound. Nothing is shelled out to a screen recorder
+or a media framework.
 
 ## Status
 
@@ -102,6 +132,37 @@ A receiver that has just ended a session refuses the next pair-setup for a momen
 while it tears the old one down; connection-level failures are retried up to
 three times, so expect the first attempt after a session to take around twenty
 seconds.
+
+## Performance
+
+Measured with the sender's own benchmarks on a ThinkPad X1 Carbon Gen 13
+(Intel Core Ultra 7 255U, integrated graphics, VA-API H.264), Omarchy on
+Hyprland 0.56, capturing the laptop's 1920x1200 panel for a 1920x1080 receiver.
+`mirror-bench` runs the real pipeline a session uses, capture and hardware
+encode, and stops short of the network.
+
+| | |
+|---|---|
+| Capture to encoded frame | **5.4 ms median**, 10.2 ms p95 |
+| CPU while streaming | **6.6 % of one core** |
+| Copies out of GPU memory | **none**: zero-copy dmabuf capture, 0 fallbacks |
+| Frames dropped | 1 of 445, and the ledger balances (published = dropped + encoded) |
+| Encoder headroom | about 110 fps of capacity at 1080p (`encode-bench`) |
+| Pipeline open | 96 ms |
+| Memory | 95 MB while streaming, and flat across a run |
+
+Capture follows the screen's damage, so an idle desktop produces few frames.
+That's by design: nothing changed, so nothing is sent. The TV adds its own
+buffering on top: about half a second on a Samsung Frame. That delay is the
+receiver's, not the sender's.
+
+Reproduce on your machine:
+
+```bash
+airplay mirror-bench --output eDP-1 --receiver 1920x1080 --seconds 10 --fps 60 --encoder gpu
+airplay encode-bench --encoder gpu --source 1920x1200 --receiver 1920x1080 --frames 600 --fps 60
+airplay capture-bench output:eDP-1 --seconds 8
+```
 
 ## How it works
 
