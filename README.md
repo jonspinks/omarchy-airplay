@@ -209,6 +209,13 @@ Security note: pair-setup keys are long-term credentials for the receiver. They
 live outside the repo and are never logged — no secret reaches stdout, stderr or
 the `--json` output.
 
+Once a receiver is paired, every session must prove it is that receiver: if
+pair-verify fails (or the stored keys can't be read), nothing is streamed and
+`mirror` exits 5. It never falls back to transient pairing for a paired
+address, because that PIN is public and would accept whatever device answers
+there. If the TV really was reset, pair again with `airplay pair <ip> --pin
+CODE`, or drop the old pairing with `airplay pair <ip> --forget`.
+
 ## Tests
 
 ```bash

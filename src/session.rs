@@ -2350,6 +2350,17 @@ pub enum SessionError {
         /// The underlying refusal, for the log. Never shown as the headline.
         detail: String,
     },
+    /// We hold credentials for this host and it did not prove it holds the
+    /// matching key, so whatever answered is not known to be the receiver we
+    /// paired with. Nothing was streamed. This is never followed by transient
+    /// pairing: its PIN is public, so a device that took over the address
+    /// would simply accept it and receive the stream. The way back is a new
+    /// pairing with the code off the real screen, or forgetting the host.
+    Unverified {
+        host: String,
+        /// The pair-verify failure, for the log.
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for SessionError {
@@ -2364,6 +2375,12 @@ impl std::fmt::Display for SessionError {
             SessionError::NeedsCode { host, detail } => write!(
                 f,
                 "this receiver needs an AirPlay code (run: airplay pair {host} --pin CODE) [{detail}]"
+            ),
+            SessionError::Unverified { host, detail } => write!(
+                f,
+                "{host} did not prove it is the receiver paired with this computer, so nothing \
+                 was sent (if the TV was reset, pair again: airplay pair {host} --pin CODE, \
+                 or forget it: airplay pair {host} --forget) [{detail}]"
             ),
         }
     }
@@ -2394,12 +2411,15 @@ impl From<PairError> for SessionError {
 /// 2. **PIN pair-setup + pair-verify**, only when a PIN is supplied in the
 ///    config; the probe's PIN attempt likewise needs a code read off the TV.
 ///
-/// Credentials that do not verify are NOT fatal and are NOT deleted: a receiver
-/// that has forgotten us (factory reset, pairings cleared) produces exactly the
-/// same `BadSignature` as a corrupt file, and in both cases the right move is
-/// to carry on to transient and let the user re-pair when they choose. The
-/// failure is said out loud on stderr, because a silent fall-back to transient
-/// is how "my credentials are not being used" hides for a month.
+/// Credentials that do not verify end the run with [`SessionError::Unverified`]
+/// and are NOT deleted. Whatever answered did not prove it holds the key we
+/// paired with, and transient pairing would not tell the difference: its PIN
+/// is public, so a device that took over the receiver's address would accept
+/// it and be sent the stream. A receiver that has genuinely forgotten us
+/// (factory reset, pairings cleared) looks exactly the same, and the way back
+/// for it is a new pairing with the code off its own screen: a PIN in the
+/// config goes straight to attempt 2, never through transient. Transient is
+/// only for a host we hold no credentials for.
 ///
 /// If every route is refused in the specific way that means "the receiver wants
 /// the code off its screen" ([`pairing::code_required`]), the error is
@@ -2421,53 +2441,44 @@ pub fn run_session_with(
     config: &SessionConfig,
     connect_to: impl Fn(&str) -> std::io::Result<RtspConnection<TcpStream>>,
 ) -> Result<Session, SessionError> {
-    // Attempt 0: the credentials we already hold.
+    // Attempt 0: the credentials we already hold. With credentials there is
+    // no route to transient below: they verify, or a PIN re-pairs, or the run
+    // ends. A connection that fails here ends it too, so a device can't steer
+    // us past verification by refusing the first connection.
     if let Some(creds) = &config.credentials {
-        match connect_to(&config.host) {
-            Ok(mut verify_conn) => match pairing::pair_verify(&mut verify_conn, creds) {
-                Ok(shared) => {
-                    let mut session = Session::bring_up(verify_conn, shared.to_vec(), config)?;
-                    session.pairing = PairingMethod::Verified;
-                    return Ok(session);
+        let mut verify_conn = connect_to(&config.host).map_err(SessionError::Io)?;
+        match pairing::pair_verify(&mut verify_conn, creds) {
+            Ok(shared) => {
+                let mut session = Session::bring_up(verify_conn, shared.to_vec(), config)?;
+                session.pairing = PairingMethod::Verified;
+                return Ok(session);
+            }
+            Err(e) => match &config.pin {
+                Some(pin) => {
+                    eprintln!(
+                        "pairing: stored credentials for {} did not verify ({e}); \
+                         pairing again with the code given",
+                        config.host
+                    );
+                    return pin_pair(config, pin, &connect_to);
                 }
-                Err(e) => eprintln!(
-                    "pairing: stored credentials for {} did not verify ({e}); \
-                     falling back to transient pairing — re-pair with \
-                     `airplay pair {} --pin CODE` if this receiver keeps asking for a code",
-                    config.host, config.host
-                ),
+                None => {
+                    return Err(SessionError::Unverified {
+                        host: config.host.clone(),
+                        detail: e.to_string(),
+                    })
+                }
             },
-            Err(e) => eprintln!(
-                "pairing: could not open a connection to {} for pair-verify ({e}); \
-                 retrying with transient pairing",
-                config.host
-            ),
         }
     }
 
-    // Attempt 1: transient.
+    // Attempt 1: transient, only ever for a host we hold no credentials for.
     let mut conn = connect_to(&config.host).map_err(SessionError::Io)?;
     match pair_transient_on(&mut conn) {
         Ok(shared) => Session::bring_up(conn, shared, config),
         Err(transient_err) => match &config.pin {
-            // Attempt 2: PIN pair-setup, then reconnect for pair-verify (the
-            // probe closes the setup connection and reconnects before verify).
-            Some(pin) => {
-                let mut setup_conn = connect_to(&config.host).map_err(SessionError::Io)?;
-                let creds = pairing::pair_setup_pin(
-                    &mut setup_conn,
-                    config.hkp,
-                    SENDER_NAME,
-                    || pin.clone(),
-                )
-                .map_err(SessionError::Pair)?;
-                let mut verify_conn = connect_to(&config.host).map_err(SessionError::Io)?;
-                let shared = pairing::pair_verify(&mut verify_conn, &creds)
-                    .map_err(SessionError::Pair)?;
-                let mut session = Session::bring_up(verify_conn, shared.to_vec(), config)?;
-                session.pairing = PairingMethod::Pin;
-                Ok(session)
-            }
+            // Attempt 2: PIN pair-setup.
+            Some(pin) => pin_pair(config, pin, &connect_to),
             None if pairing::code_required(&transient_err) => Err(SessionError::NeedsCode {
                 host: config.host.clone(),
                 detail: transient_err.to_string(),
@@ -2475,6 +2486,24 @@ pub fn run_session_with(
             None => Err(SessionError::Pair(transient_err)),
         },
     }
+}
+
+/// Attempt 2: PIN pair-setup with a code read off the receiver's own screen,
+/// then a fresh connection for pair-verify (the probe closes the setup
+/// connection and reconnects before verify, and so do we).
+fn pin_pair(
+    config: &SessionConfig,
+    pin: &str,
+    connect_to: &impl Fn(&str) -> std::io::Result<RtspConnection<TcpStream>>,
+) -> Result<Session, SessionError> {
+    let mut setup_conn = connect_to(&config.host).map_err(SessionError::Io)?;
+    let creds = pairing::pair_setup_pin(&mut setup_conn, config.hkp, SENDER_NAME, || pin.to_string())
+        .map_err(SessionError::Pair)?;
+    let mut verify_conn = connect_to(&config.host).map_err(SessionError::Io)?;
+    let shared = pairing::pair_verify(&mut verify_conn, &creds).map_err(SessionError::Pair)?;
+    let mut session = Session::bring_up(verify_conn, shared.to_vec(), config)?;
+    session.pairing = PairingMethod::Pin;
+    Ok(session)
 }
 
 #[cfg(test)]

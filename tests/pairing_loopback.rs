@@ -44,40 +44,76 @@ fn stored_credentials_are_used_and_transient_is_never_tried() {
     assert_eq!(PairingMethod::Verified.as_str(), "verified");
 }
 
-/// Credentials the receiver rejects are not fatal: the run falls back to
-/// transient, in that order, on a fresh connection.
+/// The marketplace review's case (omacom/omarchy-plugin-marketplace#8984): a
+/// device at a paired receiver's address that signs with a key our credentials
+/// don't name. It must get nothing. Transient pairing is never tried, because
+/// its PIN is public and the device would simply accept it; the run ends as
+/// `Unverified`, which says how to re-pair or forget.
 #[test]
-fn stale_credentials_fall_back_to_transient() {
-    let fake = Fake::start(Verify::Stale, Transient::Unavailable);
+fn credentials_that_dont_verify_end_the_run_and_transient_is_never_tried() {
+    let fake = Fake::start(Verify::Stale, Transient::Refused);
     let cfg = fake.config(Some(fake.credentials()));
 
-    let err = airplay_rs::session::run_session_with(&cfg, fake.dial()).err().expect("both refused");
-    // Unavailable is NOT a missing code, so it stays a plain pairing failure.
-    match err {
-        SessionError::Pair(e) => assert!(
-            e.to_string().contains("Unavailable"),
-            "expected the transient refusal to be reported, got {e}"
-        ),
-        other => panic!("expected a pairing error, got {other}"),
+    let err = airplay_rs::session::run_session_with(&cfg, fake.dial()).err().expect("unverified");
+    match &err {
+        SessionError::Unverified { host, .. } => assert_eq!(host, "127.0.0.1"),
+        other => panic!("expected Unverified, got {other}"),
     }
+    let shown = err.to_string();
+    assert!(shown.contains("airplay pair 127.0.0.1 --pin CODE"), "says how to re-pair: {shown}");
+    assert!(shown.contains("airplay pair 127.0.0.1 --forget"), "says how to forget: {shown}");
 
-    let uris = fake.uris();
-    assert_eq!(
-        uris,
-        vec!["/pair-verify", "/pair-pin-start", "/pair-setup"],
-        "verify is tried first, then transient: {uris:?}"
-    );
+    assert_eq!(fake.uris(), vec!["/pair-verify"], "pair-verify, and nothing after it");
+    assert_eq!(fake.connections_used(), 1);
 }
 
-/// A receiver that answers pair-verify with a HAP error — another way to be
-/// forgotten — takes the same fall-back.
+/// A receiver that answers pair-verify with a HAP error is no better proven,
+/// and ends the same way.
 #[test]
-fn a_receiver_that_errors_on_verify_falls_back_too() {
+fn a_receiver_that_errors_on_verify_is_not_trusted_either() {
     let fake = Fake::start(Verify::Error(6), Transient::Unavailable);
     let cfg = fake.config(Some(fake.credentials()));
-    let err = airplay_rs::session::run_session_with(&cfg, fake.dial()).err().expect("both refused");
+    let err = airplay_rs::session::run_session_with(&cfg, fake.dial()).err().expect("unverified");
+    assert!(matches!(err, SessionError::Unverified { .. }), "got {err}");
+    assert_eq!(fake.uris(), vec!["/pair-verify"]);
+}
+
+/// Refusing the first connection must not steer the run past verification: a
+/// failed connect for pair-verify ends it, rather than moving on to transient
+/// on the next connection.
+#[test]
+fn a_refused_verify_connection_does_not_lead_to_transient() {
+    let fake = Fake::start(Verify::Accept, Transient::Refused);
+    let cfg = fake.config(Some(fake.credentials()));
+    let dial = fake.dial();
+    let calls = std::cell::Cell::new(0);
+    let flaky = |host: &str| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 1 {
+            Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused"))
+        } else {
+            dial(host)
+        }
+    };
+    let err = airplay_rs::session::run_session_with(&cfg, flaky).err().expect("io");
+    assert!(matches!(err, SessionError::Io(_)), "got {err}");
+    assert_eq!(calls.get(), 1, "no second connection");
+    assert!(fake.uris().is_empty());
+}
+
+/// With a code read off the real screen, a receiver that has forgotten us is
+/// paired again directly: PIN pair-setup on the next connection, with no
+/// transient attempt in between (the old order spent one connection on it).
+#[test]
+fn a_pin_after_failed_verification_goes_straight_to_pin_pairing() {
+    let fake = Fake::start(Verify::Stale, Transient::Unavailable);
+    let mut cfg = fake.config(Some(fake.credentials()));
+    cfg.pin = Some("1234".into());
+    let err = airplay_rs::session::run_session_with(&cfg, fake.dial()).err().expect("setup refused");
     assert!(matches!(err, SessionError::Pair(_)), "got {err}");
-    assert_eq!(fake.uris(), vec!["/pair-verify", "/pair-pin-start", "/pair-setup"]);
+    let by_conn = fake.uris_by_conn();
+    assert_eq!(by_conn.first().map(|(c, u)| (*c, u.as_str())), Some((0, "/pair-verify")));
+    assert_eq!(fake.connections_used(), 2, "verify, then PIN setup, and no transient: {by_conn:?}");
 }
 
 /// The distinct failure the panel needs: transient refused as an
