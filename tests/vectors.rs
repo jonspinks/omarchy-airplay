@@ -491,7 +491,7 @@ fn discovery_info_vectors() {
     assert_eq!(info_screen_fit(&info), (disp.width_pixels, disp.height_pixels));
 
     // --- avahi row parsing (synthetic, per spec §1) ---
-    let line = "=;eth0;IPv4;Office\\032TV;_airplay._tcp;local;localhost.local;192.0.2.50;7000;\"srcvers=377.40.00\" \"deviceid=02:1A:2B:3C:4D:5E\" \"model=LS03F\"";
+    let line = "=;eth0;IPv4;Demo\\032TV;_airplay._tcp;local;localhost.local;192.0.2.50;7000;\"srcvers=377.40.00\" \"deviceid=02:1A:2B:3C:4D:5E\" \"model=LS03F\"";
     let rec = parse_avahi_line(line).expect("resolved IPv4 row");
     assert_eq!(rec.name, "Demo TV"); // \032 -> space
     assert_eq!(rec.host, "192.0.2.50"); // A-record IP, never the SRV hostname
@@ -499,8 +499,8 @@ fn discovery_info_vectors() {
     assert_eq!(rec.txt.get("srcvers").map(String::as_str), Some("377.40.00"));
     assert_eq!(rec.txt.get("model").map(String::as_str), Some("LS03F"));
     // non-resolved / non-IPv4 rows are rejected
-    assert!(parse_avahi_line("+;eth0;IPv4;Office;_airplay._tcp;local").is_none());
-    assert!(parse_avahi_line("=;eth0;IPv6;Office;_airplay._tcp;local;h;::1;7000;\"\"").is_none());
+    assert!(parse_avahi_line("+;eth0;IPv4;Demo;_airplay._tcp;local").is_none());
+    assert!(parse_avahi_line("=;eth0;IPv6;Demo;_airplay._tcp;local;h;::1;7000;\"\"").is_none());
 }
 
 #[test]
