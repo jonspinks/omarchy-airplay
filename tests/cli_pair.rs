@@ -510,10 +510,11 @@ fn mirror_uses_stored_credentials_before_transient() {
     );
 }
 
-/// A corrupt file is not a session-killer: it is reported and the run carries
-/// on to transient pairing.
+/// A corrupt file still means we paired with this host once, so it is named
+/// and the run stops before contacting the receiver: transient pairing (public
+/// PIN) must not stand in for the identity check the file can no longer make.
 #[test]
-fn mirror_with_a_corrupt_credential_file_says_so_and_falls_back() {
+fn mirror_with_a_corrupt_credential_file_says_so_and_stops() {
     let _guard = PORT_7000.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = Tmp::new("corrupt");
     std::fs::write(tmp.dir().join("127.0.0.1.json"), "{\"hkp\":3,\"pair").unwrap();
@@ -528,7 +529,33 @@ fn mirror_with_a_corrupt_credential_file_says_so_and_falls_back() {
         "the corruption should be named, not swallowed:\n{}",
         stderr(&out)
     );
-    // It fell back to transient rather than dying on the bad file.
-    assert_eq!(fake.uris(), vec!["/pair-pin-start", "/pair-setup"]);
-    assert_eq!(out.status.code(), Some(4), "and then reported the real problem");
+    assert!(
+        stderr(&out).contains("error: 127.0.0.1 did not prove it is the receiver paired with this computer"),
+        "the refusal line a script can match:\n{}",
+        stderr(&out)
+    );
+    assert!(fake.uris().is_empty(), "nothing was sent to the receiver: {:?}", fake.uris());
+    assert_eq!(out.status.code(), Some(5), "its own exit code, not 1 or 4");
+}
+
+/// Credentials the receiver can't verify against: the CLI's view of the
+/// session-level refusal, with its own exit code and line.
+#[test]
+fn mirror_with_credentials_that_dont_verify_stops_with_exit_5() {
+    let _guard = PORT_7000.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = Tmp::new("unverified");
+    let fake = Fake::start_on(7000, Verify::Stale, Transient::Refused);
+    airplay_rs::pairing::store::save_in(tmp.dir(), "127.0.0.1", &fake.credentials()).unwrap();
+
+    let out = run(
+        tmp.dir(),
+        &["mirror", "127.0.0.1", "--test-pattern", "--seconds", "1"],
+    );
+    assert!(
+        stderr(&out).contains("error: 127.0.0.1 did not prove it is the receiver paired with this computer"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(fake.uris(), vec!["/pair-verify"], "no transient after a failed verify");
+    assert_eq!(out.status.code(), Some(5));
 }

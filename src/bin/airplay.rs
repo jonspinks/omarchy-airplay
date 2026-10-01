@@ -214,8 +214,12 @@ NOTES:
     mirror USES them: when a file exists for the receiver, the session pairs
     with pair-verify instead of transient pairing, so a receiver set to ask for
     an AirPlay code stops asking on every session. Credentials that do not
-    verify — stale, corrupt, or a TV that has been reset — are reported on
-    stderr and the run falls back to transient pairing rather than failing.
+    verify — stale, corrupt, a TV that has been reset, or a device that has
+    taken over its address — stop the run before anything is streamed: mirror
+    exits 5 and prints one line naming the host, with how to pair again
+    (airplay pair <ip> --pin CODE) or forget it (airplay pair <ip> --forget).
+    It never falls back to transient pairing for a host it holds credentials
+    for: that PIN is public, so it proves nothing about who answers.
 
     If transient pairing is then refused in the way that means \"this receiver
     wants the code off its screen\", mirror exits 4 (not 1) and prints exactly:
@@ -361,6 +365,12 @@ fn main() -> ExitCode {
         Err(e) if e.downcast_ref::<NeedsCode>().is_some() => {
             eprintln!("error: {}", e.downcast_ref::<NeedsCode>().expect("just checked"));
             ExitCode::from(EXIT_NEEDS_CODE)
+        }
+        // Likewise "it didn't prove it's the TV we paired with": its own code
+        // and line, because the action is re-pair or forget, not a code.
+        Err(e) if e.downcast_ref::<Unverified>().is_some() => {
+            eprintln!("error: {}", e.downcast_ref::<Unverified>().expect("just checked"));
+            ExitCode::from(EXIT_UNVERIFIED)
         }
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -828,6 +838,34 @@ impl std::fmt::Display for NeedsCode {
 }
 
 impl std::error::Error for NeedsCode {}
+
+/// Exit code for "we hold credentials for this host and it did not prove it
+/// is the receiver we paired with". Nothing was streamed. Distinct from
+/// [`EXIT_NEEDS_CODE`] because the action differs: re-pair, or forget.
+const EXIT_UNVERIFIED: u8 = 5;
+
+/// The carrier that gets `mirror` to [`EXIT_UNVERIFIED`]; its `Display` is the
+/// line a script may match. Raised when stored credentials fail pair-verify,
+/// and when they exist but can't be read, since in both cases transient
+/// pairing (public PIN) would hand the stream to whatever answers.
+#[derive(Debug)]
+struct Unverified {
+    host: String,
+}
+
+impl std::fmt::Display for Unverified {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{h} did not prove it is the receiver paired with this computer, so nothing was sent \
+             (if the TV was reset, pair again: airplay pair {h} --pin CODE, or forget it: \
+             airplay pair {h} --forget)",
+            h = self.host
+        )
+    }
+}
+
+impl std::error::Error for Unverified {}
 
 /// `{"ok":true,…}` for `pair --json`. Key order is the contract, so this is a
 /// struct with fields in that order and not a `serde_json::json!` map (which
@@ -1723,10 +1761,13 @@ fn cmd_mirror(target: &str, rest: &[String]) -> anyhow::Result<()> {
     config.credentials = airplay_rs::pairing::store::load(&host);
     match (&config.credentials, airplay_rs::pairing::store::why_not(&host)) {
         (Some(_), _) => eprintln!("mirror: pairing with stored credentials for {host} (pair-verify)"),
-        (None, Some(why)) => eprintln!(
-            "mirror: stored credentials unusable — {why}; pairing transiently. \
-             Re-pair with `airplay pair {host} --pin CODE`"
-        ),
+        // We paired with this host once, so transient pairing (public PIN)
+        // must not stand in for the identity check we can no longer make.
+        // `airplay pair HOST --pin CODE` rewrites the file; --forget drops it.
+        (None, Some(why)) => {
+            eprintln!("mirror: stored credentials unusable — {why}");
+            return Err(anyhow::Error::new(Unverified { host }));
+        }
         (None, None) => {}
     }
 
@@ -1737,6 +1778,10 @@ fn cmd_mirror(target: &str, rest: &[String]) -> anyhow::Result<()> {
         Err(airplay_rs::session::SessionError::NeedsCode { host, detail }) => {
             eprintln!("mirror: pairing refused: {detail}");
             return Err(anyhow::Error::new(NeedsCode { host }));
+        }
+        Err(airplay_rs::session::SessionError::Unverified { host, detail }) => {
+            eprintln!("mirror: stored credentials did not verify: {detail}");
+            return Err(anyhow::Error::new(Unverified { host }));
         }
         Err(e) => return Err(anyhow::anyhow!("session bring-up failed: {e}")),
     };
