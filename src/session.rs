@@ -527,7 +527,7 @@ impl<S: Read + Write + SocketTimeout> PairTransport for RtspConnection<S> {
             Err(RtspError::Malformed(s)) => {
                 Err(PairError::Transport(std::io::Error::new(std::io::ErrorKind::InvalidData, s)))
             }
-            Err(RtspError::Desynced(s)) => {
+            Err(RtspError::Desynced(s)) | Err(RtspError::TooLarge(s)) => {
                 Err(PairError::Transport(std::io::Error::new(std::io::ErrorKind::InvalidData, s)))
             }
         }

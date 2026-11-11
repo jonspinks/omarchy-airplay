@@ -4,11 +4,44 @@
 use crate::crypto as hap;
 use std::io::{Read, Write};
 use std::net::IpAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Per-request read/write timeout default, matching the probe's
 /// `RtspConnection.request(timeout=15)` (probe.py line 250).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Largest message head (status line and headers) taken from a receiver.
+/// Real ones are under 1 KiB.
+pub const MAX_HEAD: usize = 64 * 1024;
+/// Largest message body taken from a receiver. The biggest real one, the
+/// /info plist, is a few KiB; pairing replies are smaller.
+pub const MAX_BODY: usize = 1024 * 1024;
+
+/// Whether `buf`, holding the start of one message, has already gone past
+/// what a receiver may send: a head with no end in sight, or a declared body
+/// over the cap. Checked before reading more, so an oversized or endless
+/// reply is refused instead of buffered (HANCORE, marketplace #14724).
+pub fn oversized(buf: &[u8]) -> Option<String> {
+    let Some(sep) = find_subslice(buf, b"\r\n\r\n") else {
+        return (buf.len() > MAX_HEAD).then(|| format!("reply head over {MAX_HEAD} bytes"));
+    };
+    if sep > MAX_HEAD {
+        return Some(format!("reply head over {MAX_HEAD} bytes"));
+    }
+    let head: String = buf[..sep].iter().map(|&b| b as char).collect();
+    for line in head.split("\r\n").skip(1) {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("content-length") {
+                return match v.trim().parse::<u64>() {
+                    Ok(n) if n as usize <= MAX_BODY && n <= MAX_BODY as u64 => None,
+                    Ok(n) => Some(format!("reply body of {n} bytes, over {MAX_BODY}")),
+                    Err(_) => Some("reply Content-Length is not a number".into()),
+                };
+            }
+        }
+    }
+    None
+}
 
 pub const USER_AGENT: &str = "AirPlay/935.7.1";
 pub const RTSP_VERSION: &str = "RTSP/1.0";
@@ -288,8 +321,14 @@ impl<S: Read + Write> RtspConnection<S> {
             return Err(e.into());
         }
         let want = self.cseq;
+        // The whole exchange, not each read, gets `timeout`: a receiver that
+        // trickles a reply cannot keep it going past it.
+        let deadline = timeout.map(|t| Instant::now() + t);
         loop {
-            let msg = self.read_message()?;
+            let msg = match deadline {
+                Some(at) => self.read_message_by(at, method)?,
+                None => self.read_message()?,
+            };
             match msg.header("cseq").map(|c| c.trim().parse::<u32>()) {
                 None => return Ok((msg.status_code(), msg)),
                 Some(Ok(c)) if c == want => return Ok((msg.status_code(), msg)),
@@ -301,6 +340,33 @@ impl<S: Read + Write> RtspConnection<S> {
                     return Err(RtspError::Desynced(why));
                 }
             }
+        }
+    }
+
+    /// As read_message, finished by `deadline`: each read waits only for the
+    /// time left. Running out before any byte of a reply leaves the
+    /// connection usable (a late reply is dropped by CSeq); part-way through
+    /// one, it is out of step and poisoned.
+    fn read_message_by(&mut self, deadline: Instant, method: &str) -> Result<RtspMessage, RtspError>
+    where
+        S: SocketTimeout,
+    {
+        loop {
+            if let Some(msg) = self.take_message()? {
+                return Ok(msg);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                if !self.buf.is_empty() {
+                    self.poison(format!("{method} reply not finished in time"));
+                }
+                return Err(RtspError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("{method} reply not finished in time"),
+                )));
+            }
+            self.sock.set_read_timeout(Some(left.max(Duration::from_millis(1))))?;
+            self.fill()?;
         }
     }
 
@@ -318,16 +384,31 @@ impl<S: Read + Write> RtspConnection<S> {
     }
 
     /// Read exactly one message, filling `buf` as needed (plaintext recv, or
-    /// 2-byte-LE-len + ciphertext+16-tag HAP frames when encrypted).
+    /// 2-byte-LE-len + ciphertext+16-tag HAP frames when encrypted). A reply
+    /// past MAX_HEAD or MAX_BODY is refused before more of it is read.
     pub fn read_message(&mut self) -> Result<RtspMessage, RtspError> {
         loop {
-            if let Some((msg, consumed)) = try_parse_message(&self.buf) {
-                // Keep bytes beyond this message for the next call.
-                self.buf.drain(..consumed);
+            if let Some(msg) = self.take_message()? {
                 return Ok(msg);
             }
             self.fill()?;
         }
+    }
+
+    /// The next whole message in `buf`, if there is one; an error once what
+    /// has arrived is already too big to be a real reply.
+    fn take_message(&mut self) -> Result<Option<RtspMessage>, RtspError> {
+        if let Some((msg, consumed)) = try_parse_message(&self.buf) {
+            // Keep bytes beyond this message for the next call.
+            self.buf.drain(..consumed);
+            return Ok(Some(msg));
+        }
+        if let Some(why) = oversized(&self.buf) {
+            self.poison(why.clone());
+            self.buf.clear();
+            return Err(RtspError::TooLarge(why));
+        }
+        Ok(None)
     }
 
     /// One fill step: plaintext recv, or a single HAP frame when encrypted.
@@ -410,6 +491,8 @@ pub enum RtspError {
     Io(std::io::Error),
     Decrypt,
     Malformed(String),
+    /// A reply larger than any receiver sends (MAX_HEAD, MAX_BODY).
+    TooLarge(String),
     /// The connection is out of step with the receiver (see
     /// `RtspConnection::poisoned`) and was not used.
     Desynced(String),
@@ -422,6 +505,7 @@ impl std::fmt::Display for RtspError {
             RtspError::Io(e) => write!(f, "io error: {e}"),
             RtspError::Decrypt => write!(f, "HAP open() failed"),
             RtspError::Malformed(s) => write!(f, "malformed message: {s}"),
+            RtspError::TooLarge(s) => write!(f, "receiver reply too large: {s}"),
             RtspError::Desynced(s) => write!(f, "connection out of step, not reused: {s}"),
         }
     }
@@ -594,5 +678,110 @@ mod desync_tests {
         assert!(c.poisoned().is_none());
         let (_, msg) = get(&mut c, "/b").unwrap();
         assert_eq!(msg.body, b"mine");
+    }
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    //! HANCORE, marketplace #14724: a receiver (before pairing, so anyone on
+    //! the network) could keep a reply going forever, or declare a huge body,
+    //! and the sender kept buffering. Replies are now capped, and a request's
+    //! whole exchange has a deadline.
+    use super::*;
+    use std::io::ErrorKind;
+
+    /// Sends `prefix`, then `filler` forever, `chunk` bytes per read, waiting
+    /// `pause` before each read. Counts what it handed out.
+    struct Endless {
+        prefix: Vec<u8>,
+        filler: u8,
+        chunk: usize,
+        pause: Duration,
+        sent: usize,
+    }
+
+    impl Read for Endless {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            if !self.pause.is_zero() {
+                std::thread::sleep(self.pause);
+            }
+            let n = self.chunk.min(out.len());
+            for (i, b) in out[..n].iter_mut().enumerate() {
+                *b = self.prefix.get(self.sent + i).copied().unwrap_or(self.filler);
+            }
+            self.sent += n;
+            Ok(n)
+        }
+    }
+
+    impl Write for Endless {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl SocketTimeout for Endless {
+        fn set_read_timeout(&self, _: Option<Duration>) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn set_write_timeout(&self, _: Option<Duration>) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn endless(prefix: &str, chunk: usize, pause: Duration) -> RtspConnection<Endless> {
+        RtspConnection::new(Endless { prefix: prefix.as_bytes().to_vec(), filler: b'a', chunk, pause, sent: 0 })
+    }
+
+    fn ask(c: &mut RtspConnection<Endless>, timeout: Duration) -> Result<(u16, RtspMessage), RtspError> {
+        c.request("POST", "/pair-setup", &[], Some(CT_OCTET_STREAM), b"x", Some(timeout))
+    }
+
+    #[test]
+    fn a_head_that_never_ends_is_refused_at_the_cap() {
+        let mut c = endless("RTSP/1.0 200 OK\r\nX-Pad: ", 65536, Duration::ZERO);
+        assert!(matches!(ask(&mut c, Duration::from_secs(30)), Err(RtspError::TooLarge(_))));
+        assert!(c.sock.sent <= MAX_HEAD + 65536, "read {} bytes", c.sock.sent);
+        assert!(c.buf.is_empty() && c.poisoned().is_some());
+    }
+
+    #[test]
+    fn a_huge_declared_body_is_refused_before_it_is_read() {
+        let mut c = endless("RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 4000000000\r\n\r\n", 4096, Duration::ZERO);
+        assert!(matches!(ask(&mut c, Duration::from_secs(30)), Err(RtspError::TooLarge(_))));
+        assert!(c.sock.sent <= 4096, "read {} bytes", c.sock.sent);
+    }
+
+    #[test]
+    fn a_trickled_reply_stops_at_the_exchange_deadline() {
+        // Each byte arrives well inside any per-read timeout; the whole reply never does.
+        let mut c = endless("RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 500\r\n\r\n", 1, Duration::from_millis(5));
+        let started = Instant::now();
+        match ask(&mut c, Duration::from_millis(300)) {
+            Err(RtspError::Io(e)) => assert_eq!(e.kind(), ErrorKind::TimedOut),
+            other => panic!("expected a timeout, got {other:?}"),
+        }
+        assert!(started.elapsed() < Duration::from_millis(900), "took {:?}", started.elapsed());
+        assert!(c.poisoned().is_some(), "cut off part-way through a reply: out of step");
+    }
+
+    #[test]
+    fn replies_up_to_the_caps_are_read() {
+        let body = "b".repeat(MAX_BODY);
+        let head = format!("RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: {}\r\n\r\n", body.len());
+        let mut c = endless(&(head + &body), 65536, Duration::ZERO);
+        let (status, msg) = ask(&mut c, Duration::from_secs(30)).unwrap();
+        assert_eq!((status, msg.body.len()), (200, MAX_BODY));
+    }
+
+    #[test]
+    fn oversized_reads_the_head_as_it_arrives() {
+        assert_eq!(oversized(b"RTSP/1.0 200 OK\r\nCSeq: 1"), None);
+        assert!(oversized(&vec![b'a'; MAX_HEAD + 1]).is_some());
+        assert!(oversized(b"RTSP/1.0 200 OK\r\nContent-Length: nope\r\n\r\n").is_some());
+        assert_eq!(oversized(b"RTSP/1.0 200 OK\r\ncontent-length: 10\r\n\r\n"), None);
     }
 }
